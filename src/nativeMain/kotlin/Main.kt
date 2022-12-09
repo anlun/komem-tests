@@ -9,39 +9,53 @@ class Data {
     var b = AB_INIT_VALUE
 }
 
-fun main() {
-    val t1 = Worker.start()
-    val t2 = Worker.start()
-    var weakHappened = false
+const val ITER_NUMBER = 10000
+fun litmusTestII(name : String,
+                 weakValueA : Int,
+                 weakValueB: Int,
+                 t1 : Data.() -> Unit,
+                 t2 : Data.() -> Unit
+) {
+    val w1 = Worker.start()
+    val w2 = Worker.start()
+    var weakIteration : Int? = null
     var wrongABvalues = false
-    for (i in 0..10000) {
-        if (wrongABvalues) { break }
+    for (i in 0..ITER_NUMBER) {
+        if (wrongABvalues || weakIteration != null) { break }
         val s = Data()
-        val f1 = t1.execute(TransferMode.SAFE, { s }) {
-            it.x = 1
-            it.a = it.y
-        }
-        val f2 = t2.execute(TransferMode.SAFE, { s }) {
-            it.y = 1
-            it.b = it.x
-        }
+        // `execute` doesn't depend on its TransferMode argument,
+        // so its value is irrelevant
+        val tm = TransferMode.SAFE
+        val f1 = w1.execute(tm, { t1 to s }, { (f, s) -> f(s) })
+        val f2 = w2.execute(tm, { t2 to s }, { (f, s) -> f(s) })
         f1.consume {
             f2.consume {
                 if (s.a == AB_INIT_VALUE || s.b == AB_INIT_VALUE) {
                     wrongABvalues = true
                 }
-                if (s.a == 0 && s.b == 0) {
-                    weakHappened = true
-                    println(i)
+                if (s.a == weakValueA && s.b == weakValueB) {
+                    weakIteration = i
                 }
             }
         }
     }
     if (wrongABvalues) {
-        println("Either a or b is not assigned by the litmus test!")
-    } else if (weakHappened) {
-        println("The SB weak result IS observed.")
+        println("Either a or b is not assigned by the $name litmus test!")
+    } else if (weakIteration != null) {
+        println("The $name weak result IS observed on the $weakIteration iteration.")
     } else {
-        println("The SB weak result is NOT observed.")
+        println("The $name weak result is NOT observed.")
     }
+}
+
+fun main() {
+    litmusTestII("SB", 0, 0,
+        { x = 1; a = y },
+        { y = 1; b = x })
+    litmusTestII("LB", 1, 1,
+        { a = y; x = 1 },
+        { b = x; y = 1 })
+    litmusTestII("MP", 1, 0,
+        { y = 1; x = 1 },
+        { a = x; b = y })
 }
